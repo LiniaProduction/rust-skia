@@ -5,4 +5,5 @@ target/
 .direnv/
 /tmp/
 .DS_Store
+/docker/wasm-dawn/.docker_hash
 
