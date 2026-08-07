@@ -1,0 +1,15 @@
+[package]
+name = "wasm-example-webgl"
+version = "0.1.0"
+edition = "2024"
+
+# Standalone: `gl` and `dawn` are mutually exclusive on wasm, so the two examples
+# cannot share a build.
+[workspace]
+
+[features]
+default = ["skia-safe/gl"]
+
+[dependencies]
+skia-safe = { path = "../skia-safe" }
+gl = "0.14.0"

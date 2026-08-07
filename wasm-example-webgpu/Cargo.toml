@@ -1,0 +1,17 @@
+[package]
+name = "wasm-example-webgpu"
+version = "0.1.0"
+edition = "2024"
+
+# Standalone: this example's features are mutually exclusive with the WebGL one's,
+# so it cannot share a build with the main workspace.
+[workspace]
+
+[features]
+default = ["skia-safe/dawn"]
+
+[dependencies]
+skia-safe = { path = "../skia-safe" }
+
+[build-dependencies]
+cc = "1.1"
