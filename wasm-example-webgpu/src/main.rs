@@ -105,6 +105,21 @@ pub extern "C" fn init(width: i32, height: i32) -> *mut State {
         return std::ptr::null_mut();
     };
 
+    // Upload the scene's raster image once, here.
+    //
+    // Graphite draws from textures only, and it will not upload one while a recording is
+    // being built: a raster SkImage reaching the canvas fails with "Couldn't convert
+    // SkImage to a Graphite-backed representation" and the tile silently stays empty.
+    // The upload is recorded into this same recorder, so it is submitted with the first
+    // frame, before any draw that samples it.
+    match scene::checker_image() {
+        Some(raster) => match graphite::images::texture_from_image(&mut recorder, &raster) {
+            Some(texture) => scene::set_image(texture),
+            None => eprintln!("[example] could not upload the scene image to a texture"),
+        },
+        None => eprintln!("[example] could not build the scene's raster image"),
+    }
+
     Box::into_raw(Box::new(State {
         context,
         recorder,

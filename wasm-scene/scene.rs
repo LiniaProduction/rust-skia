@@ -429,7 +429,10 @@ fn image_tile(canvas: &Canvas, r: Rect, t: f32) {
 }
 
 /// A small procedurally generated image — avoids shipping an asset with the example.
-fn checker_image() -> Option<Image> {
+///
+/// Public because Graphite cannot upload a raster image mid-recording: that caller needs
+/// the pixels up front, to turn into a texture once and pass back to [`set_image`].
+pub fn checker_image() -> Option<Image> {
     const SIZE: usize = 64;
     let mut pixels = vec![0u8; SIZE * SIZE * 4];
     for y in 0..SIZE {
