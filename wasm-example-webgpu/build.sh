@@ -19,6 +19,7 @@ docker run --rm \
     -v rust-skia-rustup-cache:/rustup-cache \
     -v rust-skia-emsdk-cache:/emsdk-cache \
     -w "$REPO_ROOT/wasm-example-webgpu" \
+    -e DEBUG_SKIA="${DEBUG_SKIA:-1}" \
     -e EM_CACHE=/emsdk-cache \
     --entrypoint bash \
     "$IMAGE" -c '
@@ -31,6 +32,11 @@ git -C / config --global --add safe.directory "*"
 # build and expects REPO_ROOT. Everything needed is set explicitly here instead.
 # emsdk_env.sh clears EM_CACHE, so restore it afterwards to keep the cache volume.
 export EM_CACHE=/emsdk-cache
+# SKIA_DEBUG=1 keeps SkASSERT alive. Skia states its invariants as assertions -- for
+# instance that a texture copy never happens inside a render pass -- and a release
+# build compiles them out, so a violated invariant becomes a silently corrupted
+# command buffer instead of a message naming the line. Set DEBUG_SKIA=0 to opt out.
+export SKIA_DEBUG="${DEBUG_SKIA:-1}"
 export SKIA_NINJA_COMMAND=/usr/bin/ninja
 export FORCE_SKIA_BUILD=1
 export CC_wasm32_unknown_emscripten=emcc
@@ -53,7 +59,7 @@ PORT="--use-port=$SKIA_EMDAWNWEBGPU_PKG_DIR/emdawnwebgpu.port.py"
 export EMCC_CFLAGS="$PORT -sERROR_ON_UNDEFINED_SYMBOLS=0 -sSUPPORT_LONGJMP=wasm \
   -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createModule \
   -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB \
-  -sEXPORTED_FUNCTIONS=_main,_init,_render,_render_mode,_resize"
+  -sEXPORTED_FUNCTIONS=_main,_init,_render,_render_mode,_render_mask,_set_blend_filter,_resize"
 export EMCC_CXXFLAGS="$EMCC_CFLAGS"
 
 # build-std needs a nightly toolchain and rust-src; both land in the rustup volume,

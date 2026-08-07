@@ -33,6 +33,10 @@
     <canvas id="canvas" width="960" height="540"></canvas>
     <div id="status">starting…</div>
     <pre id="diag" style="font:11px ui-monospace,monospace;color:#8a8a99;max-width:960px;white-space:pre-wrap"></pre>
+    <!-- Classic script, and first: module scripts are deferred, so this is the only
+         way to hook the console before wasm starts printing. -->
+    <script src="./collect-log.js"></script>
+    <script src="./trace-webgpu.js"></script>
     <script type="module" src="./main.js"></script>
   </body>
 </html>

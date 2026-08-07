@@ -92,14 +92,22 @@ pub fn draw(canvas: &Canvas, width: f32, height: f32, t: f32) {
 /// combination* with the others -- drawing each one alone can succeed while the same
 /// set in a single recording does not.
 pub fn draw_n(canvas: &Canvas, width: f32, height: f32, t: f32, count: usize) {
+    let indices: Vec<usize> = (0..count.min(TILES.len())).collect();
+    draw_selected(canvas, width, height, t, &indices);
+}
+
+/// Draw an arbitrary subset, laid out as if the full grid were present.
+///
+/// Bisecting by *which* tiles, not just how many, is what separates "this feature
+/// fails after any other content" from "it fails only after a particular one".
+pub fn draw_selected(canvas: &Canvas, width: f32, height: f32, t: f32, indices: &[usize]) {
     canvas.clear(Color::from_rgb(0x1e, 0x1e, 0x24));
 
     let tile_w = (width - PAD * (COLS as f32 + 1.0)) / COLS as f32;
     let tile_h = (height - PAD * (ROWS as f32 + 1.0)) / ROWS as f32;
 
-    let tiles = &TILES[..count.min(TILES.len())];
-
-    for (i, tile) in tiles.iter().enumerate() {
+    for &i in indices {
+        let tile = &TILES[i % TILES.len()];
         let col = (i % COLS) as f32;
         let row = (i / COLS) as f32;
         let rect = Rect::from_xywh(
@@ -288,15 +296,34 @@ fn rounded_rects(canvas: &Canvas, r: Rect, _t: f32) {
     }
 }
 
+/// The blend modes the blend tile shows, in order.
+///
+/// The last three cannot be expressed by fixed-function blending -- they need the
+/// destination read back -- which is exactly the distinction under investigation.
+pub const BLEND_MODES: [BlendMode; 6] = [
+    BlendMode::SrcOver,
+    BlendMode::Plus,
+    BlendMode::Screen,
+    BlendMode::Overlay,
+    BlendMode::Darken,
+    BlendMode::SoftLight,
+];
+
+thread_local! {
+    static BLEND_FILTER: RefCell<Option<usize>> = const { RefCell::new(None) };
+}
+
+/// Restrict the blend tile to a single mode, by index into [`BLEND_MODES`].
+pub fn set_blend_filter(index: Option<usize>) {
+    BLEND_FILTER.with(|f| *f.borrow_mut() = index);
+}
+
 fn blend_modes(canvas: &Canvas, r: Rect, _t: f32) {
-    let modes = [
-        BlendMode::SrcOver,
-        BlendMode::Plus,
-        BlendMode::Screen,
-        BlendMode::Overlay,
-        BlendMode::Darken,
-        BlendMode::SoftLight,
-    ];
+    let filter = BLEND_FILTER.with(|f| *f.borrow());
+    let modes: Vec<BlendMode> = match filter {
+        Some(i) => vec![BLEND_MODES[i % BLEND_MODES.len()]],
+        None => BLEND_MODES.to_vec(),
+    };
     let cell_w = r.width() / 3.0;
     let cell_h = r.height() / 2.0;
 

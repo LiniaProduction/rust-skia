@@ -131,6 +131,23 @@ pub extern "C" fn resize(state: *mut State, width: i32, height: i32) {
 /// minimal mode separates two very different failures: if even one rectangle is
 /// dropped the problem is in context or surface setup, and if it draws while the
 /// scene does not, some specific drawing feature is unsupported.
+/// Restrict the blend tile to one mode; -1 restores all of them.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_blend_filter(index: i32) {
+    scene::set_blend_filter(if index < 0 { None } else { Some(index as usize) });
+}
+
+/// Draw a chosen subset: `mask` bit N selects tile N.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_mask(state: *mut State, time: f32, mask: u32) {
+    let s = unsafe { &mut *state };
+    let (w, h) = (s.width as f32, s.height as f32);
+    let indices: Vec<usize> = (0..12).filter(|i| mask & (1 << i) != 0).collect();
+    with_frame(s, |canvas| {
+        scene::draw_selected(canvas, w, h, time, &indices)
+    });
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn render_mode(state: *mut State, time: f32, mode: i32) {
     if mode == 1 {
