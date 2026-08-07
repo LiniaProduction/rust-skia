@@ -48,6 +48,11 @@ webp-encode = []
 webp-decode = []
 pdf = ["jpeg"]
 graphite = []
+# Graphite's Dawn (WebGPU) backend. Currently `wasm32-unknown-emscripten` only,
+# where WebGPU is provided by Emscripten itself (`webgpu/webgpu.h` plus
+# `libwebgpu.js`, enabled with `-sUSE_WEBGPU=1` at link time) rather than by a
+# Dawn source build. Mutually exclusive with `gl` on that target.
+dawn = ["graphite"]
 # sys libraries
 use-system-jpeg-turbo = ["dep:mozjpeg-sys"]
 # `textlayout` because `SkSVGTextContext::SkSVGTextContext()` invokes `SkShaper::Make`.

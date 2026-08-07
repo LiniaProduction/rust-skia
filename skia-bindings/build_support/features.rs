@@ -52,6 +52,10 @@ impl Features {
             features += feature::GRAPHITE;
         }
 
+        if cfg!(feature = "dawn") {
+            features += feature::DAWN;
+        }
+
         if cfg!(feature = "textlayout") {
             features += feature::TEXTLAYOUT;
         }
@@ -91,6 +95,10 @@ impl Features {
 
     pub fn graphite(&self) -> bool {
         self[feature::GRAPHITE]
+    }
+
+    pub fn dawn(&self) -> bool {
+        self[feature::DAWN]
     }
 
     pub fn is_empty(&self) -> bool {
@@ -210,6 +218,8 @@ pub mod feature {
 
     /// Build with Graphite support
     pub const GRAPHITE: &str = "graphite";
+    /// Build the Graphite Dawn (WebGPU) backend
+    pub const DAWN: &str = "dawn";
 
     /// Features related to text layout. Modules skshaper and skparagraph
     pub const TEXTLAYOUT: &str = "textlayout";
@@ -237,6 +247,7 @@ pub mod feature {
         (X11, &[GL]),
         (WAYLAND, &[EGL]),
         (SKOTTIE, &[TEXTLAYOUT]),
+        (DAWN, &[GRAPHITE]),
         (PDF, &[JPEG_ENCODE, JPEG_DECODE]),
     ];
 

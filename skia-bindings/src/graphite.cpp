@@ -30,6 +30,11 @@
 #include "include/gpu/graphite/vk/VulkanGraphiteContext.h"
 #endif
 
+#ifdef SK_DAWN
+#include "include/gpu/graphite/dawn/DawnBackendContext.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
+#endif
+
 // Forward declaration to avoid including Recording.h which exposes std::unordered_set
 namespace skgpu::graphite {
     class Recording;
@@ -412,5 +417,43 @@ extern "C" skgpu::graphite::Context* C_ContextFactory_MakeVulkan(
     const skgpu::graphite::ContextOptions* options) {
     return skgpu::graphite::ContextFactory::MakeVulkan(
         *static_cast<const skgpu::VulkanBackendContext*>(backendContext), *options).release();
+}
+#endif
+
+//
+// gpu/graphite/dawn/DawnBackendContext.h
+//
+
+#ifdef SK_DAWN
+// The handles come from whoever owns the WebGPU device -- in a browser that is
+// JavaScript. The wgpu C++ wrappers add a reference on construction, so the caller
+// keeps ownership of what it passed in, and fTick keeps its platform default
+// (nullptr under Emscripten, where the browser drives the event loop).
+extern "C" void C_DawnBackendContext_Construct(
+    skgpu::graphite::DawnBackendContext* uninitialized,
+    WGPUInstance instance, WGPUDevice device, WGPUQueue queue) {
+    new (uninitialized) skgpu::graphite::DawnBackendContext();
+    uninitialized->fInstance = wgpu::Instance(instance);
+    uninitialized->fDevice = wgpu::Device(device);
+    uninitialized->fQueue = wgpu::Queue(queue);
+}
+
+extern "C" void C_DawnBackendContext_destruct(skgpu::graphite::DawnBackendContext* self) {
+    self->~DawnBackendContext();
+}
+
+extern "C" skgpu::graphite::Context* C_ContextFactory_MakeDawn(
+    const skgpu::graphite::DawnBackendContext* backendContext,
+    const skgpu::graphite::ContextOptions* options) {
+    return skgpu::graphite::ContextFactory::MakeDawn(*backendContext, *options).release();
+}
+
+// Wraps a texture the caller already owns -- typically the one handed out by
+// GPUCanvasContext.getCurrentTexture() for the frame being drawn.
+extern "C" void C_BackendTextures_MakeDawn(
+    skgpu::graphite::BackendTexture* uninitialized,
+    WGPUTexture texture) {
+    new (uninitialized) skgpu::graphite::BackendTexture(
+        skgpu::graphite::BackendTextures::MakeDawn(texture));
 }
 #endif

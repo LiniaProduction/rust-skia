@@ -19,6 +19,28 @@ impl PlatformDetails for Emscripten {
             .arg("target_cpu", quote("wasm"))
             .arg("skia_emsdk_dir", quote(&emsdk_base_dir));
 
+        // No Dawn is built on wasm: the WebGPU implementation is the browser's, and
+        // shaders come from Skia's own WGSL code generator rather than Tint. What Skia
+        // does need is a `webgpu/webgpu_cpp.h` recent enough for its Graphite Dawn
+        // sources — Emscripten's built-in one is too old (no `DualSourceBlending`,
+        // `CoreFeaturesAndLimits`, `R16Unorm`, ...), so the headers come from the
+        // `emdawnwebgpu` package published with Dawn's releases.
+        //
+        // Deliberately not `is_canvaskit`: rust-skia's wasm support is built around
+        // non-canvaskit builds — Skia's toolchain only emits the `.wasm.a` archive
+        // names that `binaries_config` expects when `is_canvaskit` is false. The Dawn
+        // include paths it would otherwise suppress are handled below instead.
+        //
+        // Include paths rather than `--use-port`: emcc merges EMCC_CFLAGS into every
+        // invocation and rejects a port named twice, which it would be for anyone who
+        // (correctly) puts `--use-port` in EMCC_CFLAGS to link the JS glue.
+        if features.dawn() {
+            let pkg_dir = emdawnwebgpu_pkg_dir();
+            builder
+                .cflag(format!("-isystem{pkg_dir}/webgpu/include"))
+                .cflag(format!("-isystem{pkg_dir}/webgpu_cpp/include"));
+        }
+
         // The custom embedded font manager is enabled by default on WASM, but depends
         // on the undefined symbol `SK_EMBEDDED_FONTS`. Enable the custom empty font
         // manager instead so typeface creation still works.
@@ -34,6 +56,16 @@ impl PlatformDetails for Emscripten {
         // visibility=default, otherwise some types may be missing:
         // <https://github.com/rust-lang/rust-bindgen/issues/751#issuecomment-555735577>
         builder.arg("-fvisibility=default");
+
+        // Bindgen drives libclang directly and the `cc` build of our own .cpp files does
+        // not go through emcc's port machinery either, so both need the WebGPU headers
+        // spelled out. These must come before Emscripten's sysroot, whose built-in
+        // `webgpu/` headers are older and would otherwise win.
+        if cfg!(feature = "dawn") {
+            let pkg_dir = emdawnwebgpu_pkg_dir();
+            builder.arg(format!("-isystem{pkg_dir}/webgpu/include"));
+            builder.arg(format!("-isystem{pkg_dir}/webgpu_cpp/include"));
+        }
 
         let emsdk_base_dir = emsdk_base_dir();
 
@@ -79,7 +111,30 @@ impl PlatformDetails for Emscripten {
         mut features: Features,
     ) -> Features {
         features += feature::EMBED_FREETYPE;
+
+        // WebGL and WebGPU are mutually exclusive in a single wasm build: CanvasKit turns
+        // Ganesh off entirely for its WebGPU variant, and that is the only configuration
+        // upstream tests. Dropping GL here also switches `skia_enable_ganesh` and
+        // `skia_use_webgl` off, because both are derived from `features.gpu()`.
+        if features.dawn() {
+            features.set(feature::GL, false);
+        }
+
         features
+    }
+}
+
+/// Root of an unpacked `emdawnwebgpu_pkg` from a Dawn release.
+///
+/// A few hundred kilobytes of headers plus JS glue — not a Dawn checkout. Emscripten
+/// ships its own `webgpu/` headers, but they lag Skia's Graphite Dawn sources.
+fn emdawnwebgpu_pkg_dir() -> String {
+    match cargo::env_var("SKIA_EMDAWNWEBGPU_PKG_DIR") {
+        Some(val) => val,
+        None => panic!(
+            "the `dawn` feature needs SKIA_EMDAWNWEBGPU_PKG_DIR set to an unpacked \
+             emdawnwebgpu_pkg from https://github.com/google/dawn/releases"
+        ),
     }
 }
 
