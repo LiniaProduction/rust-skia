@@ -23,10 +23,16 @@ pub use skia_bindings::skgpu_Mipmapped as Mipmapped;
 pub use skia_bindings::skgpu_Protected as Protected;
 variant_name!(Protected::Yes);
 
+// Despite living in `skgpu`, these two only reach the bindings through Ganesh
+// headers, so they are absent from a Graphite-only build.
+#[cfg(feature = "gpu")]
 pub use skia_bindings::skgpu_Renderable as Renderable;
+#[cfg(feature = "gpu")]
 variant_name!(Renderable::No);
 
+#[cfg(feature = "gpu")]
 pub use skia_bindings::skgpu_Origin as Origin;
+#[cfg(feature = "gpu")]
 variant_name!(Origin::TopLeft);
 
 bitflags! {

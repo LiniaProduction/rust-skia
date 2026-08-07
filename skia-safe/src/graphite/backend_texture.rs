@@ -46,6 +46,25 @@ impl BackendTexture {
         Self { inner }
     }
 
+    /// Construct in place from a backend-specific `BackendTextures::Make*` wrapper.
+    ///
+    /// Keeps the backend modules free to build textures without reaching into this
+    /// type's representation.
+    ///
+    /// # Safety
+    ///
+    /// `construct` must leave a fully initialized `BackendTexture` at the pointer.
+    pub(crate) unsafe fn construct(
+        construct: impl FnOnce(*mut sb::skgpu_graphite_BackendTexture),
+    ) -> Self {
+        let inner = unsafe {
+            let mut inner = std::mem::MaybeUninit::uninit();
+            construct(inner.as_mut_ptr());
+            inner.assume_init()
+        };
+        Self { inner }
+    }
+
     /// Create a BackendTexture by copying from another
     pub fn from_backend_texture(other: &BackendTexture) -> Self {
         let inner = unsafe {

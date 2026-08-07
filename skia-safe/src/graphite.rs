@@ -77,6 +77,9 @@ pub mod mtl;
 #[cfg(feature = "vulkan")]
 pub mod vk;
 
+#[cfg(feature = "dawn")]
+pub mod dawn;
+
 pub use implementation::*;
 
 #[cfg(test)]

@@ -61,6 +61,16 @@ pub mod gpu {
 
     use crate::prelude::*;
 
+    // `gpu/types.rs` wraps the `skgpu::` types that Ganesh and Graphite share —
+    // `BackendApi`, `Budgeted`, `Mipmapped` and friends — and depends on nothing
+    // Ganesh-specific. A Graphite-only build (`dawn` without `gl`/`vulkan`/`metal`)
+    // switches the `gpu` feature off, so without this they would disappear along
+    // with Ganesh and `graphite::types` would fail to resolve them.
+    #[cfg(feature = "graphite")]
+    mod types;
+    #[cfg(feature = "graphite")]
+    pub use types::*;
+
     #[derive(Debug)]
     pub enum RecordingContext {}
 
