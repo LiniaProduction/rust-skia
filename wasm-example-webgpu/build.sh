@@ -53,7 +53,7 @@ PORT="--use-port=$SKIA_EMDAWNWEBGPU_PKG_DIR/emdawnwebgpu.port.py"
 export EMCC_CFLAGS="$PORT -sERROR_ON_UNDEFINED_SYMBOLS=0 -sSUPPORT_LONGJMP=wasm \
   -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createModule \
   -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB \
-  -sEXPORTED_FUNCTIONS=_main,_init,_render,_resize"
+  -sEXPORTED_FUNCTIONS=_main,_init,_render,_render_mode,_resize"
 export EMCC_CXXFLAGS="$EMCC_CFLAGS"
 
 # build-std needs a nightly toolchain and rust-src; both land in the rustup volume,

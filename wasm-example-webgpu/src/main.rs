@@ -10,7 +10,8 @@
 use std::{ffi::CString, os::raw::c_char};
 
 use skia_safe::{
-    ColorType, Surface,
+    AlphaType, Canvas, Color, ColorType, ImageInfo, Paint, Rect, Surface,
+    graphite::Mipmapped,
     graphite::{self, Context, InsertRecordingInfo, Recorder, dawn},
 };
 
@@ -32,6 +33,20 @@ unsafe extern "C" {
 
 pub struct State {
     context: Context,
+    /// One recorder for the lifetime of the app, not one per frame: a Recorder owns
+    /// the resource and pipeline caches, so recreating it every frame throws them
+    /// away and re-does the work each time.
+    recorder: Recorder,
+    /// Scene drawing goes here, not straight to the swapchain texture.
+    ///
+    /// Graphite splits a frame with saveLayer into several render passes, and Safari
+    /// drops the whole frame when more than one of them touches the texture from
+    /// getCurrentTexture(). Drawing offscreen and blitting once keeps the swapchain
+    /// texture down to a single pass, whatever Skia does internally.
+    offscreen: Surface,
+    /// Frames repeat 60 times a second; a failure that prints every frame buries
+    /// everything else in the console.
+    reported: bool,
     surface: WgpuHandle,
     device: WgpuHandle,
     width: i32,
@@ -62,13 +77,39 @@ pub extern "C" fn init(width: i32, height: i32) -> *mut State {
 
     // SAFETY: all three handles come from the shim above and belong to one device.
     let backend_context = unsafe { dawn::BackendContext::new(instance, device, queue) };
-    let Some(context) = dawn::make_context(&backend_context, None) else {
+    let Some(mut context) = dawn::make_context(&backend_context, None) else {
         eprintln!("Graphite rejected the WebGPU backend context");
+        return std::ptr::null_mut();
+    };
+
+    let Some(recorder) = context.make_recorder(None) else {
+        eprintln!("could not create a Graphite recorder");
+        return std::ptr::null_mut();
+    };
+
+    let mut recorder = recorder;
+    let image_info = ImageInfo::new(
+        (width, height),
+        ColorType::BGRA8888,
+        AlphaType::Premul,
+        None,
+    );
+    let Some(offscreen) = graphite::surfaces::render_target(
+        &mut recorder,
+        &image_info,
+        Mipmapped::No,
+        None,
+        Some("scene"),
+    ) else {
+        eprintln!("could not create the offscreen surface");
         return std::ptr::null_mut();
     };
 
     Box::into_raw(Box::new(State {
         context,
+        recorder,
+        offscreen,
+        reported: false,
         surface,
         device,
         width,
@@ -85,37 +126,103 @@ pub extern "C" fn resize(state: *mut State, width: i32, height: i32) {
 }
 
 /// Draw one frame. `time` is seconds since start.
+///
+/// `mode` 0 draws the full scene; mode 1 draws a single filled rectangle. The
+/// minimal mode separates two very different failures: if even one rectangle is
+/// dropped the problem is in context or surface setup, and if it draws while the
+/// scene does not, some specific drawing feature is unsupported.
 #[unsafe(no_mangle)]
-pub extern "C" fn render(state: *mut State, time: f32) {
-    let state = unsafe { &mut *state };
+pub extern "C" fn render_mode(state: *mut State, time: f32, mode: i32) {
+    if mode == 1 {
+        render_minimal(state);
+    } else if mode >= 100 {
+        let n = (mode - 100) as usize;
+        let s = unsafe { &mut *state };
+        let (w, h) = (s.width as f32, s.height as f32);
+        with_frame(s, |canvas| scene::draw_n(canvas, w, h, time, n));
+    } else if mode >= 10 {
+        render_single_tile(state, time, (mode - 10) as usize);
+    } else {
+        render(state, time);
+    }
+}
 
+fn render_single_tile(state: *mut State, time: f32, index: usize) {
+    let s = unsafe { &mut *state };
+    let (w, h) = (s.width as f32, s.height as f32);
+    with_frame(s, |canvas| scene::draw_tile(canvas, index, w, h, time));
+}
+
+/// Everything a frame needs around the actual drawing: this frame's swapchain
+/// texture, a recorder, the Skia surface wrapping it, and the submit afterwards.
+fn with_frame(state: &mut State, draw: impl FnOnce(&Canvas)) {
     // The swapchain texture is only valid for this frame.
     let texture = unsafe { demo_wgpu_current_texture(state.surface) };
     if texture.is_null() {
         return;
     }
 
-    let Some(mut recorder) = state.context.make_recorder(None) else {
+    let Some(mut surface) = wrap(&mut state.recorder, texture) else {
+        report_once(state, "wrap_backend_texture returned None");
         unsafe { demo_wgpu_release_texture(texture) };
         return;
     };
 
-    if let Some(mut surface) = wrap(&mut recorder, texture) {
-        scene::draw(
-            surface.canvas(),
-            state.width as f32,
-            state.height as f32,
-            time,
-        );
+    draw(state.offscreen.canvas());
 
-        if let Some(mut recording) = recorder.snap() {
-            let info = InsertRecordingInfo::new(&mut recording);
-            state.context.insert_recording(&info);
-            state.context.submit(None);
+    // The only draw that touches the swapchain texture.
+    match graphite::surfaces::as_image(&state.offscreen) {
+        Some(image) => {
+            surface
+                .canvas()
+                .draw_image(&image, (0.0, 0.0), Some(&Paint::default()));
         }
+        None => report_once(state, "surfaces::as_image returned None"),
+    }
+
+    // Every one of these can fail quietly and leave a blank canvas, so none of them
+    // is ignored: a dropped frame should say which step dropped it.
+    match state.recorder.snap() {
+        Some(mut recording) => {
+            let info = InsertRecordingInfo::new(&mut recording);
+            let status = state.context.insert_recording(&info);
+            if status != graphite::InsertStatus::Success {
+                report_once(state, &format!("insert_recording: {status:?}"));
+            }
+            if !state.context.submit(None) {
+                report_once(state, "submit returned false");
+            }
+        }
+        None => report_once(state, "recorder.snap() returned None"),
     }
 
     unsafe { demo_wgpu_release_texture(texture) };
+}
+
+fn render_minimal(state: *mut State) {
+    let s = unsafe { &mut *state };
+    let (w, h) = (s.width as f32, s.height as f32);
+    with_frame(s, |canvas| {
+        canvas.clear(Color::from_rgb(0x20, 0x20, 0x28));
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_color(Color::from_rgb(0x4f, 0x9d, 0xff));
+        canvas.draw_rect(Rect::from_xywh(w * 0.25, h * 0.25, w * 0.5, h * 0.5), &paint);
+    });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn render(state: *mut State, time: f32) {
+    let s = unsafe { &mut *state };
+    let (w, h) = (s.width as f32, s.height as f32);
+    with_frame(s, |canvas| scene::draw(canvas, w, h, time));
+}
+
+fn report_once(state: &mut State, what: &str) {
+    if !state.reported {
+        state.reported = true;
+        eprintln!("[example] frame dropped: {what}");
+    }
 }
 
 fn wrap(recorder: &mut Recorder, texture: WgpuHandle) -> Option<Surface> {

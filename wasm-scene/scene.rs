@@ -8,40 +8,96 @@
 //! join/cap styles, gradients, dashes, layer blending, clipping, image filters,
 //! images, and a runtime (SkSL) shader.
 
+use std::cell::RefCell;
+
 use skia_safe::{
     BlendMode, Canvas, Color, Color4f, Font, FontMgr, FontStyle, Image, Paint, PaintCap,
     PaintJoin, PaintStyle, PathBuilder, PathEffect, Point, RRect, Rect, RuntimeEffect,
     SamplingOptions, TileMode, gradient_shader, image_filters, images,
 };
 
+thread_local! {
+    // Compiling SkSL and building the raster image are per-frame costs that have no
+    // business being per-frame: the shader compile alone is tens of milliseconds, which
+    // pushes a frame past the window in which the swapchain texture stays presentable.
+    // Safari then shows nothing at all, which is how this was found.
+    static EFFECT: RefCell<Option<Option<RuntimeEffect>>> = const { RefCell::new(None) };
+    static IMAGE: RefCell<Option<Option<Image>>> = const { RefCell::new(None) };
+}
+
+/// Supply an image for the image tile, replacing the built-in raster one.
+///
+/// Graphite cannot upload a raster image while recording, so a Graphite caller
+/// uploads once at startup and hands the texture-backed image over here.
+pub fn set_image(image: Image) {
+    IMAGE.with(|slot| *slot.borrow_mut() = Some(Some(image)));
+}
+
 pub const COLS: usize = 4;
 pub const ROWS: usize = 3;
 const PAD: f32 = 16.0;
+
+/// The tiles, in drawing order. Exposed so a caller can render them one at a time:
+/// when a backend silently drops draws, showing them individually is what tells you
+/// which feature is unsupported.
+pub const TILES: [fn(&Canvas, Rect, f32); 12] = [
+    fill_and_stroke,
+    joins_and_caps,
+    linear_gradient,
+    radial_and_sweep,
+    dashed_path,
+    bezier_path,
+    rounded_rects,
+    blend_modes,
+    save_layer_and_clip,
+    blur_filter,
+    image_tile,
+    runtime_shader,
+];
+
+pub const TILE_NAMES: [&str; 12] = [
+    "fill+stroke",
+    "joins+caps",
+    "linear gradient",
+    "radial+sweep",
+    "dashed",
+    "bezier",
+    "rounded rects",
+    "blend modes",
+    "saveLayer+clip",
+    "blur filter",
+    "image",
+    "runtime shader (SkSL)",
+];
+
+/// Draw a single tile filling the whole canvas.
+pub fn draw_tile(canvas: &Canvas, index: usize, width: f32, height: f32, t: f32) {
+    canvas.clear(Color::from_rgb(0x1e, 0x1e, 0x24));
+    let rect = Rect::from_xywh(PAD, PAD, width - PAD * 2.0, height - PAD * 2.0);
+    frame(canvas, rect);
+    TILES[index % TILES.len()](canvas, rect.with_inset((20.0, 20.0)), t);
+}
 
 /// Draw the whole scene, scaled to fit `width` x `height`.
 ///
 /// `t` is seconds since start; a few tiles animate so a still frame cannot hide a
 /// backend that only draws once.
 pub fn draw(canvas: &Canvas, width: f32, height: f32, t: f32) {
+    draw_n(canvas, width, height, t, TILES.len());
+}
+
+/// Draw only the first `count` tiles.
+///
+/// Bisecting by count is how you find a tile that a backend cannot cope with *in
+/// combination* with the others -- drawing each one alone can succeed while the same
+/// set in a single recording does not.
+pub fn draw_n(canvas: &Canvas, width: f32, height: f32, t: f32, count: usize) {
     canvas.clear(Color::from_rgb(0x1e, 0x1e, 0x24));
 
     let tile_w = (width - PAD * (COLS as f32 + 1.0)) / COLS as f32;
     let tile_h = (height - PAD * (ROWS as f32 + 1.0)) / ROWS as f32;
 
-    let tiles: [fn(&Canvas, Rect, f32); 12] = [
-        fill_and_stroke,
-        joins_and_caps,
-        linear_gradient,
-        radial_and_sweep,
-        dashed_path,
-        bezier_path,
-        rounded_rects,
-        blend_modes,
-        save_layer_and_clip,
-        blur_filter,
-        image_tile,
-        runtime_shader,
-    ];
+    let tiles = &TILES[..count.min(TILES.len())];
 
     for (i, tile) in tiles.iter().enumerate() {
         let col = (i % COLS) as f32;
@@ -323,7 +379,12 @@ fn blur_filter(canvas: &Canvas, r: Rect, t: f32) {
 }
 
 fn image_tile(canvas: &Canvas, r: Rect, t: f32) {
-    if let Some(image) = checker_image() {
+    let cached = IMAGE.with(|slot| {
+        slot.borrow_mut()
+            .get_or_insert_with(checker_image)
+            .clone()
+    });
+    if let Some(image) = cached {
         let angle = t * 12.0;
         let count = canvas.save();
         canvas.translate((r.center_x(), r.center_y()));
@@ -379,7 +440,12 @@ fn runtime_shader(canvas: &Canvas, r: Rect, t: f32) {
         }
     ";
 
-    let Ok(effect) = RuntimeEffect::make_for_shader(SKSL, None) else {
+    let cached = EFFECT.with(|slot| {
+        slot.borrow_mut()
+            .get_or_insert_with(|| RuntimeEffect::make_for_shader(SKSL, None).ok())
+            .clone()
+    });
+    let Some(effect) = cached else {
         return;
     };
 
