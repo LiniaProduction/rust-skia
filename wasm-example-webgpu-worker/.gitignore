@@ -1,0 +1,5 @@
+target/
+web/wasm_example_webgpu_worker.js
+web/*.wasm
+web/page.log
+build.log
