@@ -123,7 +123,7 @@ struct Dependency {
 
 const DEPENDENCIES: &[Dependency] = &[Dependency {
     repo: "skia",
-    url: "https://codeload.github.com/rust-skia/skia/tar.gz",
+    url: "https://codeload.github.com/LiniaProduction/skia/tar.gz",
     path_filter: filter_skia,
 }];
 
