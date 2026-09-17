@@ -34,6 +34,12 @@ impl ContextOptions {
         Self { inner }
     }
 
+    /// Set the GPU memory budget of the context.
+    pub fn set_gpu_budget_in_bytes(&mut self, bytes: usize) -> &mut Self {
+        unsafe { sb::C_ContextOptions_setGpuBudgetInBytes(&mut self.inner, bytes) }
+        self
+    }
+
     pub(crate) fn native(&self) -> &sb::skgpu_graphite_ContextOptions {
         &self.inner
     }

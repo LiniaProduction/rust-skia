@@ -125,6 +125,51 @@ impl Context {
         unsafe { sb::C_Context_isDeviceLost(self.native()) }
     }
 
+    /// Free all GPU resources the Context holds that are not in use.
+    pub fn free_gpu_resources(&mut self) {
+        unsafe { sb::C_Context_freeGpuResources(self.native_mut()) }
+    }
+
+    /// Purge resources unused for `not_used`, or otherwise marked for deletion,
+    /// whether or not the cache is over budget. `max_purging` bounds the time spent.
+    pub fn perform_deferred_cleanup(
+        &mut self,
+        not_used: std::time::Duration,
+        max_purging: impl Into<Option<std::time::Duration>>,
+    ) {
+        let max = max_purging
+            .into()
+            .map(|d| d.as_micros().min(i64::MAX as u128) as i64)
+            .unwrap_or(-1);
+        unsafe {
+            sb::C_Context_performDeferredCleanup(
+                self.native_mut(),
+                not_used.as_millis().min(i64::MAX as u128) as i64,
+                max,
+            )
+        }
+    }
+
+    /// Bytes of the GPU memory budget currently in use.
+    pub fn current_budgeted_bytes(&self) -> usize {
+        unsafe { sb::C_Context_currentBudgetedBytes(self.native()) }
+    }
+
+    /// Bytes of the resource cache that are currently purgeable.
+    pub fn current_purgeable_bytes(&self) -> usize {
+        unsafe { sb::C_Context_currentPurgeableBytes(self.native()) }
+    }
+
+    /// The GPU memory budget in bytes.
+    pub fn max_budgeted_bytes(&self) -> usize {
+        unsafe { sb::C_Context_maxBudgetedBytes(self.native()) }
+    }
+
+    /// Set the GPU memory budget; lowering it frees resources to get under it.
+    pub fn set_max_budgeted_bytes(&mut self, bytes: usize) {
+        unsafe { sb::C_Context_setMaxBudgetedBytes(self.native_mut(), bytes) }
+    }
+
     /// Synchronously read pixels from a Graphite-backed `surface`.
     ///
     /// Graphite is a deferred backend, so [`Surface::read_pixels`] does not work;

@@ -17,6 +17,9 @@
 #include "include/gpu/graphite/GraphiteTypes.h"
 #include "include/gpu/graphite/Image.h"
 #include "include/gpu/graphite/Recorder.h"
+
+#include <chrono>
+#include <optional>
 #include "include/gpu/graphite/Surface.h"
 #include "include/gpu/graphite/TextureInfo.h"
 
@@ -124,6 +127,35 @@ extern "C" void C_Context_deleteBackendTexture(skgpu::graphite::Context* self, c
 
 extern "C" bool C_Context_isDeviceLost(const skgpu::graphite::Context* self) {
     return self->isDeviceLost();
+}
+
+extern "C" void C_Context_freeGpuResources(skgpu::graphite::Context* self) {
+    self->freeGpuResources();
+}
+
+// `microsMaxPurgingDur` < 0 means no limit.
+extern "C" void C_Context_performDeferredCleanup(skgpu::graphite::Context* self, int64_t msNotUsed, int64_t microsMaxPurgingDur) {
+    std::optional<std::chrono::microseconds> maxDur;
+    if (microsMaxPurgingDur >= 0) {
+        maxDur = std::chrono::microseconds(microsMaxPurgingDur);
+    }
+    self->performDeferredCleanup(std::chrono::milliseconds(msNotUsed), maxDur);
+}
+
+extern "C" size_t C_Context_currentBudgetedBytes(const skgpu::graphite::Context* self) {
+    return self->currentBudgetedBytes();
+}
+
+extern "C" size_t C_Context_currentPurgeableBytes(const skgpu::graphite::Context* self) {
+    return self->currentPurgeableBytes();
+}
+
+extern "C" size_t C_Context_maxBudgetedBytes(const skgpu::graphite::Context* self) {
+    return self->maxBudgetedBytes();
+}
+
+extern "C" void C_Context_setMaxBudgetedBytes(skgpu::graphite::Context* self, size_t bytes) {
+    self->setMaxBudgetedBytes(bytes);
 }
 
 // skgpu::graphite::Context is owned via std::unique_ptr (Context::MakeMetal etc.
@@ -246,6 +278,10 @@ extern "C" void C_RecorderOptions_Construct(skgpu::graphite::RecorderOptions* un
     new(uninitialized) skgpu::graphite::RecorderOptions();
 }
 
+extern "C" void C_ContextOptions_setGpuBudgetInBytes(skgpu::graphite::ContextOptions* self, size_t bytes) {
+    self->fGpuBudgetInBytes = bytes;
+}
+
 extern "C" void C_RecorderOptions_destruct(skgpu::graphite::RecorderOptions* self) {
     self->~RecorderOptions();
 }
@@ -262,6 +298,39 @@ extern "C" SkCanvas* C_Recorder_makeDeferredCanvas(skgpu::graphite::Recorder* se
 
 extern "C" skgpu::BackendApi C_Recorder_backend(const skgpu::graphite::Recorder* self) {
     return self->backend();
+}
+
+extern "C" void C_Recorder_freeGpuResources(skgpu::graphite::Recorder* self) {
+    self->freeGpuResources();
+}
+
+// `microsMaxPurgingDur` < 0 means no limit.
+extern "C" void C_Recorder_performDeferredCleanup(skgpu::graphite::Recorder* self, int64_t msNotUsed, int64_t microsMaxPurgingDur) {
+    std::optional<std::chrono::microseconds> maxDur;
+    if (microsMaxPurgingDur >= 0) {
+        maxDur = std::chrono::microseconds(microsMaxPurgingDur);
+    }
+    self->performDeferredCleanup(std::chrono::milliseconds(msNotUsed), maxDur);
+}
+
+extern "C" size_t C_Recorder_currentBudgetedBytes(const skgpu::graphite::Recorder* self) {
+    return self->currentBudgetedBytes();
+}
+
+extern "C" size_t C_Recorder_currentPurgeableBytes(const skgpu::graphite::Recorder* self) {
+    return self->currentPurgeableBytes();
+}
+
+extern "C" size_t C_Recorder_maxBudgetedBytes(const skgpu::graphite::Recorder* self) {
+    return self->maxBudgetedBytes();
+}
+
+extern "C" void C_Recorder_setMaxBudgetedBytes(skgpu::graphite::Recorder* self, size_t bytes) {
+    self->setMaxBudgetedBytes(bytes);
+}
+
+extern "C" void C_RecorderOptions_setGpuBudgetInBytes(skgpu::graphite::RecorderOptions* self, size_t bytes) {
+    self->fGpuBudgetInBytes = bytes;
 }
 
 // skgpu::graphite::Recorder is owned via std::unique_ptr (Context::makeRecorder
