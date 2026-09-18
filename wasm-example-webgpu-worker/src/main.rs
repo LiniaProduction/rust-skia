@@ -177,7 +177,9 @@ pub extern "C" fn gpu_init(device: Handle) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn app_create(id: i32, surface: Handle, width: i32, height: i32, offscreen: i32) -> *mut App {
-    let Some(recorder) = with_gpu(|g| g.context.make_recorder(None)).flatten() else {
+    let mut options = graphite::RecorderOptions::new();
+    options.set_caching_image_provider(256);
+    let Some(recorder) = with_gpu(|g| g.context.make_recorder(Some(&options))).flatten() else {
         eprintln!("[spike] app {id}: make_recorder failed");
         return std::ptr::null_mut();
     };
@@ -196,6 +198,18 @@ pub extern "C" fn app_create(id: i32, surface: Handle, width: i32, height: i32, 
     }
     println!("[spike] app {id} created {width}x{height} offscreen={}", app.offscreen.is_some());
     Box::into_raw(Box::new(app))
+}
+
+/// Hand the scene its raster tile as is: the recorder's image provider uploads it on draw.
+#[unsafe(no_mangle)]
+pub extern "C" fn scene_use_raster_image() -> i32 {
+    match scene::checker_image() {
+        Some(raster) => {
+            scene::set_image(raster);
+            0
+        }
+        None => -1,
+    }
 }
 
 /// Upload the scene's raster tile through this app's recorder.

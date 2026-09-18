@@ -90,7 +90,8 @@ async function run(canvases, params) {
     if (!app) throw new Error(`app_create ${i}`);
     return { canvas, ctx, app };
   });
-  if (!glOnly && !both) module._scene_upload_image(apps[0].app);
+  if (params.has("raster")) module._scene_use_raster_image();
+  else if (!glOnly && !both) module._scene_upload_image(apps[0].app);
   log(`preferredFormat=${format} apps=${apps.length}`);
 
   const imported = [];

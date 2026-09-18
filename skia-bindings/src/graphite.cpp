@@ -17,6 +17,10 @@
 #include "include/gpu/graphite/GraphiteTypes.h"
 #include "include/gpu/graphite/Image.h"
 #include "include/gpu/graphite/Recorder.h"
+#include "include/gpu/graphite/ImageProvider.h"
+#include "include/core/SkTiledImageUtils.h"
+#include "src/core/SkChecksum.h"
+#include "src/core/SkLRUCache.h"
 
 #include <chrono>
 #include <optional>
@@ -280,6 +284,80 @@ extern "C" void C_RecorderOptions_Construct(skgpu::graphite::RecorderOptions* un
 
 extern "C" void C_ContextOptions_setGpuBudgetInBytes(skgpu::graphite::ContextOptions* self, size_t bytes) {
     self->fGpuBudgetInBytes = bytes;
+}
+
+// An ImageProvider that uploads raster images on first use and keeps the textures in an LRU
+// cache. Adapted from Skia's TestingImageProvider (tools/graphite/GraphiteToolUtils.cpp), with
+// the capacity made a parameter.
+//
+// Graphite's default provider returns nullptr for every raster image, and the draw is then
+// dropped with "Couldn't convert SkImage to a Graphite-backed representation". Clients that
+// draw raster images -- small sprites, placeholders, decoded assets -- need a real one.
+namespace {
+class CachingImageProvider final : public skgpu::graphite::ImageProvider {
+public:
+    explicit CachingImageProvider(int capacity) : fCache(capacity) {}
+
+    sk_sp<SkImage> findOrCreate(skgpu::graphite::Recorder* recorder,
+                                const SkImage* image,
+                                SkImage::RequiredProperties requiredProps) override {
+        if (!requiredProps.fMipmapped) {
+            // A mipmapped version, if there is one, serves a non-mipmapped request too.
+            ImageKey mipMappedKey(image, /* mipmapped= */ true);
+            if (auto result = fCache.find(mipMappedKey)) {
+                return *result;
+            }
+        }
+
+        ImageKey key(image, requiredProps.fMipmapped);
+        if (auto result = fCache.find(key)) {
+            return *result;
+        }
+
+        sk_sp<SkImage> newImage = SkImages::TextureFromImage(recorder, image, requiredProps);
+        if (!newImage) {
+            return nullptr;
+        }
+        return *fCache.insert(key, std::move(newImage));
+    }
+
+private:
+    class ImageKey {
+    public:
+        ImageKey(const SkImage* image, bool mipmapped) {
+            uint32_t flags = mipmapped ? 0x1 : 0x0;
+            SkTiledImageUtils::GetImageKeyValues(image, &fValues[1]);
+            fValues[kNumValues - 1] = flags;
+            fValues[0] = SkChecksum::Hash32(&fValues[1], (kNumValues - 1) * sizeof(uint32_t));
+        }
+
+        uint32_t hash() const { return fValues[0]; }
+
+        bool operator==(const ImageKey& other) const {
+            for (int i = 0; i < kNumValues; ++i) {
+                if (fValues[i] != other.fValues[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        bool operator!=(const ImageKey& other) const { return !(*this == other); }
+
+    private:
+        static const int kNumValues = SkTiledImageUtils::kNumImageKeyValues + 2;
+        uint32_t fValues[kNumValues];
+    };
+
+    struct ImageHash {
+        size_t operator()(const ImageKey& key) const { return key.hash(); }
+    };
+
+    SkLRUCache<ImageKey, sk_sp<SkImage>, ImageHash> fCache;
+};
+}  // namespace
+
+extern "C" void C_RecorderOptions_setCachingImageProvider(skgpu::graphite::RecorderOptions* self, int capacity) {
+    self->fImageProvider = sk_make_sp<CachingImageProvider>(capacity);
 }
 
 extern "C" void C_RecorderOptions_destruct(skgpu::graphite::RecorderOptions* self) {

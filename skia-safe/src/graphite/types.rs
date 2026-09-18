@@ -53,6 +53,16 @@ impl RecorderOptions {
         Self { inner }
     }
 
+    /// Give recorders made with these options an image provider that uploads raster images
+    /// on first draw and caches up to `capacity` of the resulting textures (LRU).
+    ///
+    /// Without one, Graphite drops every draw of a raster image.
+    pub fn set_caching_image_provider(&mut self, capacity: usize) -> &mut Self {
+        let capacity = capacity.min(i32::MAX as usize) as i32;
+        unsafe { sb::C_RecorderOptions_setCachingImageProvider(&mut self.inner, capacity) }
+        self
+    }
+
     /// Set the GPU memory budget of recorders made with these options.
     pub fn set_gpu_budget_in_bytes(&mut self, bytes: usize) -> &mut Self {
         unsafe { sb::C_RecorderOptions_setGpuBudgetInBytes(&mut self.inner, bytes) }
