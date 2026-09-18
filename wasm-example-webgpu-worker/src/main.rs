@@ -19,6 +19,92 @@ mod scene;
 
 type Handle = *mut std::ffi::c_void;
 
+/// Ganesh/WebGL, the fallback backend, living in the same wasm as Graphite/WebGPU.
+mod ganesh {
+    use std::ffi::CString;
+    use std::os::raw::c_char;
+
+    use skia_safe::{
+        ColorType, Surface,
+        gpu::{self, DirectContext, SurfaceOrigin, backend_render_targets, gl::FramebufferInfo, surfaces},
+    };
+
+    unsafe extern "C" {
+        fn emscripten_GetProcAddress(name: *const c_char) -> *const std::ffi::c_void;
+    }
+
+    pub struct GlApp {
+        pub context: DirectContext,
+        pub surface: Surface,
+    }
+
+    pub fn create(width: i32, height: i32) -> Option<GlApp> {
+        gl::load_with(|name| {
+            let name = CString::new(name).unwrap();
+            unsafe { emscripten_GetProcAddress(name.as_ptr()) as *const _ }
+        });
+        let interface = gpu::gl::Interface::new_native()?;
+        let mut context = gpu::direct_contexts::make_gl(interface, None)?;
+        let surface = wrap_framebuffer(&mut context, width, height)?;
+        Some(GlApp { context, surface })
+    }
+
+    pub fn wrap_framebuffer(context: &mut DirectContext, width: i32, height: i32) -> Option<Surface> {
+        let mut fboid: gl::types::GLint = 0;
+        unsafe { gl::GetIntegerv(gl::FRAMEBUFFER_BINDING, &mut fboid) };
+        let info = FramebufferInfo {
+            fboid: fboid.try_into().ok()?,
+            format: gl::RGBA8,
+            protected: gpu::Protected::No,
+        };
+        let target = backend_render_targets::make_gl((width, height), 1, 8, info);
+        surfaces::wrap_backend_render_target(
+            context,
+            &target,
+            SurfaceOrigin::BottomLeft,
+            ColorType::RGBA8888,
+            None,
+            None,
+        )
+    }
+}
+
+thread_local! {
+    static GL_APPS: RefCell<Vec<ganesh::GlApp>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Create an app on the WebGL fallback backend. JavaScript must have made this
+/// canvas's GL context current first.
+#[unsafe(no_mangle)]
+pub extern "C" fn gl_app_create(width: i32, height: i32) -> i32 {
+    match ganesh::create(width, height) {
+        Some(app) => GL_APPS.with(|apps| {
+            let mut apps = apps.borrow_mut();
+            apps.push(app);
+            println!("[spike] gl app {} created {width}x{height}", apps.len() - 1);
+            (apps.len() - 1) as i32
+        }),
+        None => {
+            eprintln!("[spike] gl app creation failed");
+            -1
+        }
+    }
+}
+
+/// Draw one frame on the WebGL fallback backend.
+#[unsafe(no_mangle)]
+pub extern "C" fn gl_app_frame(index: i32, time: f32, width: i32, height: i32) -> i32 {
+    GL_APPS.with(|apps| {
+        let mut apps = apps.borrow_mut();
+        let Some(app) = apps.get_mut(index as usize) else {
+            return -1;
+        };
+        scene::draw(app.surface.canvas(), width as f32, height as f32, time);
+        app.context.flush_and_submit_surface(&mut app.surface, None);
+        0
+    })
+}
+
 unsafe extern "C" {
     fn spike_create_instance() -> Handle;
     fn spike_device_queue(device: Handle) -> Handle;
@@ -105,16 +191,28 @@ pub extern "C" fn app_create(id: i32, surface: Handle, width: i32, height: i32, 
         frames: 0,
         reported: false,
     };
-    if id == 0 {
-        if let Some(texture) = scene::checker_image().and_then(|raster| graphite::images::texture_from_image(&mut app.recorder, &raster)) {
-            scene::set_image(texture);
-        }
-    }
     if offscreen != 0 {
         app.offscreen = make_offscreen(&mut app.recorder, width, height);
     }
     println!("[spike] app {id} created {width}x{height} offscreen={}", app.offscreen.is_some());
     Box::into_raw(Box::new(app))
+}
+
+/// Upload the scene's raster tile through this app's recorder.
+///
+/// Not done in `app_create`: the scene holds one image for the whole thread, and a
+/// Graphite-backed one cannot be drawn by the WebGL fallback backend, so a run that
+/// exercises both backends leaves it unset.
+#[unsafe(no_mangle)]
+pub extern "C" fn scene_upload_image(app: *mut App) -> i32 {
+    let app = unsafe { &mut *app };
+    match scene::checker_image().and_then(|raster| graphite::images::texture_from_image(&mut app.recorder, &raster)) {
+        Some(texture) => {
+            scene::set_image(texture);
+            0
+        }
+        None => -1,
+    }
 }
 
 fn make_offscreen(recorder: &mut Recorder, width: i32, height: i32) -> Option<Surface> {

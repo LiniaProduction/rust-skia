@@ -112,14 +112,10 @@ impl PlatformDetails for Emscripten {
     ) -> Features {
         features += feature::EMBED_FREETYPE;
 
-        // WebGL and WebGPU are mutually exclusive in a single wasm build: CanvasKit turns
-        // Ganesh off entirely for its WebGPU variant, and that is the only configuration
-        // upstream tests. Dropping GL here also switches `skia_enable_ganesh` and
-        // `skia_use_webgl` off, because both are derived from `features.gpu()`.
-        if features.dawn() {
-            features.set(feature::GL, false);
-        }
-
+        // `gl` and `dawn` may be enabled together: Skia only asserts that Dawn implies
+        // Graphite, and CanvasKit ships them separately for packaging reasons rather
+        // than because the combination does not build. A consumer that wants WebGPU
+        // with a WebGL fallback in one wasm needs both.
         features
     }
 }

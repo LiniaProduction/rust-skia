@@ -60,7 +60,24 @@ async function run(canvases, params) {
   if (rc !== 0) throw new Error(`gpu_init ${rc}`);
 
   const format = navigator.gpu.getPreferredCanvasFormat();
+  // ?gl=1 puts both canvases on the WebGL fallback, ?both=1 puts canvas 1 there while
+  // canvas 0 stays on WebGPU -- the question is whether one wasm can drive both.
+  const glOnly = params.has("gl");
+  const both = params.has("both");
+  const glCanvases = glOnly ? [0, 1] : both ? [1] : [];
+  const glApps = new Map();
+  for (const i of glCanvases) {
+    const canvas = canvases[i];
+    const gl = canvas.getContext("webgl2", { antialias: true, depth: false, stencil: true });
+    const handle = module.GL.registerContext(gl, { majorVersion: 2 });
+    module.GL.makeContextCurrent(handle);
+    const index = module._gl_app_create(canvas.width, canvas.height);
+    if (index < 0) throw new Error(`gl_app_create ${i}`);
+    glApps.set(i, { canvas, gl, handle, index });
+    log(`gl app ${i} index=${index} contextLost=${gl.isContextLost()}`);
+  }
   const apps = canvases.map((canvas, i) => {
+    if (glApps.has(i)) return { canvas, gl: glApps.get(i) };
     const ctx = canvas.getContext("webgpu");
     ctx.configure({
       device,
@@ -73,6 +90,7 @@ async function run(canvases, params) {
     if (!app) throw new Error(`app_create ${i}`);
     return { canvas, ctx, app };
   });
+  if (!glOnly && !both) module._scene_upload_image(apps[0].app);
   log(`preferredFormat=${format} apps=${apps.length}`);
 
   const imported = [];
@@ -141,11 +159,19 @@ async function run(canvases, params) {
     device.pushErrorScope("validation");
     const f0 = performance.now();
     const modeFor = (i) => (params.has("shared") ? (i === 0 ? 0 : 3) : mode >= 0 ? mode : i === 0 ? 0 : 2);
+    const drawApp = (a, i, phase) => {
+      if (a.gl) {
+        module.GL.makeContextCurrent(a.gl.handle);
+        module._gl_app_frame(a.gl.index, time, a.canvas.width, a.canvas.height);
+        return;
+      }
+      module._app_frame(a.app, time, modeFor(i), phase);
+    };
     if (interleave) {
-      apps.forEach((a, i) => module._app_frame(a.app, time, modeFor(i), 1));
-      module._app_frame(apps[0].app, time, modeFor(0), 2);
+      apps.forEach((a, i) => drawApp(a, i, 1));
+      if (apps[0].app) module._app_frame(apps[0].app, time, modeFor(0), 2);
     } else {
-      apps.forEach((a, i) => module._app_frame(a.app, time, modeFor(i), 3));
+      apps.forEach((a, i) => drawApp(a, i, 3));
     }
     frameMs.push(performance.now() - f0);
     device.popErrorScope().then((e) => {
