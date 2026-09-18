@@ -498,6 +498,27 @@ extern "C" SkImage* C_SkImages_WrapTextureGraphite(
             sp(colorSpace)).release();
 }
 
+// Like C_SkImages_WrapTextureGraphite, plus a proc Skia calls exactly once: when the image
+// is destroyed, or right away if wrapping fails.
+extern "C" SkImage* C_SkImages_WrapTextureGraphiteWithRelease(
+        skgpu::graphite::Recorder* recorder,
+        const skgpu::graphite::BackendTexture* backendTexture,
+        SkColorType colorType,
+        SkAlphaType alphaType,
+        SkColorSpace* colorSpace,
+        void (*releaseProc)(void*),
+        void* releaseContext) {
+    return SkImages::WrapTexture(
+            recorder,
+            *backendTexture,
+            colorType,
+            alphaType,
+            sp(colorSpace),
+            skgpu::Origin::kTopLeft,
+            releaseProc,
+            releaseContext).release();
+}
+
 extern "C" SkImage* C_SkImages_TextureFromImageGraphite(
         skgpu::graphite::Recorder* recorder,
         const SkImage* image) {

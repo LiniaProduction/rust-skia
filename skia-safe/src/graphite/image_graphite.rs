@@ -44,6 +44,42 @@ pub fn wrap_texture(
     Image::from_ptr(image_ptr)
 }
 
+/// Like [`wrap_texture`], and `release` runs once the image no longer needs the texture:
+/// when the image is destroyed, or right away if wrapping fails.
+///
+/// This is how a client that owns the texture learns when it may free it.
+pub fn wrap_texture_with_release(
+    recorder: &mut Recorder,
+    backend_texture: &BackendTexture,
+    color_type: ColorType,
+    alpha_type: AlphaType,
+    color_space: impl Into<Option<ColorSpace>>,
+    release: impl FnOnce() + 'static,
+) -> Option<Image> {
+    unsafe extern "C" fn trampoline(context: *mut std::ffi::c_void) {
+        let release = unsafe { Box::from_raw(context as *mut Box<dyn FnOnce()>) };
+        release();
+    }
+
+    let color_space_ptr = color_space.into().into_ptr_or_null();
+    let release: Box<Box<dyn FnOnce()>> = Box::new(Box::new(release));
+    let context = Box::into_raw(release) as *mut std::ffi::c_void;
+
+    let image_ptr = unsafe {
+        sb::C_SkImages_WrapTextureGraphiteWithRelease(
+            recorder.native_mut(),
+            backend_texture.native(),
+            color_type.into_native(),
+            alpha_type,
+            color_space_ptr,
+            Some(trampoline),
+            context,
+        )
+    };
+
+    Image::from_ptr(image_ptr)
+}
+
 /// Create a texture-backed image from an existing image using Graphite
 ///
 /// This function uploads the image data to the GPU and creates a texture-backed image.
