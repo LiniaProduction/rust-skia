@@ -34,6 +34,14 @@ impl ContextOptions {
         Self { inner }
     }
 
+    /// The sample count Graphite uses for its internal MSAA draws. `1` (or `0`) disables
+    /// them, and paths are anti-aliased through the path atlas instead; otherwise one of
+    /// 2, 4, 8 or 16.
+    pub fn set_internal_multisample_count(&mut self, samples: u8) -> &mut Self {
+        unsafe { sb::C_ContextOptions_setInternalMultisampleCount(&mut self.inner, samples) }
+        self
+    }
+
     /// Set the GPU memory budget of the context.
     pub fn set_gpu_budget_in_bytes(&mut self, bytes: usize) -> &mut Self {
         unsafe { sb::C_ContextOptions_setGpuBudgetInBytes(&mut self.inner, bytes) }

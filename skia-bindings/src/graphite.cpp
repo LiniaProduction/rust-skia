@@ -282,6 +282,12 @@ extern "C" void C_RecorderOptions_Construct(skgpu::graphite::RecorderOptions* un
     new(uninitialized) skgpu::graphite::RecorderOptions();
 }
 
+// `samples` <= 1 turns Graphite's internal multisampling off: paths are anti-aliased through
+// the path atlas instead of MSAA render targets.
+extern "C" void C_ContextOptions_setInternalMultisampleCount(skgpu::graphite::ContextOptions* self, uint8_t samples) {
+    self->fInternalMultisampleCount = static_cast<skgpu::graphite::SampleCount>(samples <= 1 ? 1 : samples);
+}
+
 extern "C" void C_ContextOptions_setGpuBudgetInBytes(skgpu::graphite::ContextOptions* self, size_t bytes) {
     self->fGpuBudgetInBytes = bytes;
 }
